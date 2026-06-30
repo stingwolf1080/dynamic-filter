@@ -4,25 +4,18 @@ import (
 	"context"
 	"math"
 
-	"time"
-
 	hooks "github.com/stingwolf1080/dynamic-filter/hook"
+	"github.com/stingwolf1080/dynamic-filter/pkg/config"
 	"github.com/stingwolf1080/dynamic-filter/pkg/filter"
 	"github.com/stingwolf1080/dynamic-filter/pkg/helper"
 	"github.com/stingwolf1080/dynamic-filter/pkg/mongox"
 	"github.com/stingwolf1080/dynamic-filter/pkg/util/types"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"gorm.io/gorm"
 )
 
 type genericRepository[T any] struct {
-	db             any
 	collectionName string
 	modelName      string
 	prefix         string
-	id             primitive.ObjectID
 	restrict       map[string]bool
 	alias          map[string]string
 	isReturn       bool
@@ -30,10 +23,9 @@ type genericRepository[T any] struct {
 	response       any
 }
 
-func NewGenericRepository[T any](db any, collectionName string) Repository[T] {
+func NewGenericRepository[T any](collectionName string) Repository[T] {
 	modelName := helper.GetNameModel[T]()
 	return &genericRepository[T]{
-		db:             db,
 		collectionName: collectionName,
 		modelName:      modelName,
 		restrict:       make(map[string]bool),
@@ -77,16 +69,6 @@ func (r *genericRepository[T]) SetTimezone(zone string) {
 	r.timezone = zone
 }
 
-func (r *genericRepository[T]) SetID(id types.ID) {
-	if oid, ok := id.Val.(primitive.ObjectID); ok {
-		r.id = oid
-	} else if s, ok := id.Val.(string); ok {
-		if oid, err := primitive.ObjectIDFromHex(s); err == nil {
-			r.id = oid
-		}
-	}
-}
-
 func (r *genericRepository[T]) RegisterHandle(name string, fn func(ctx context.Context, data any, prefix string) types.Message) {
 	registerHandle(r.modelName, name, fn)
 }
@@ -119,11 +101,15 @@ func (r *genericRepository[T]) Create(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &data); err.HasError() {
 		return err
@@ -177,11 +163,15 @@ func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
 			}
 		}
 	}
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	for k, _data := range data {
 		if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &_data); err.HasError() {
@@ -267,11 +257,15 @@ func (r *genericRepository[T]) Update(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterUpdate, &data); err.HasError() {
 		return err
@@ -304,11 +298,15 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 			return err
 		}
 	}
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterDelete, &delete_message); err.HasError() {
 		return err
@@ -327,79 +325,69 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 	}
 }
 
-func (r *genericRepository[T]) DeleteBy(data T) (message types.Message) {
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		var err error
-		var delete_message types.DeletePost
-
-		if hook, ok := any(&data).(hooks.HasDeletePost); ok {
-			delete_message = hook.GetDeletePost()
-			if delete_message.Id.IsZero() {
-				message.Status = "error"
-				message.Code = 400
-				message.Message = "Data does not exists"
-				return
-			}
-		}
-
-		if hook, ok := any(&data).(hooks.BeforeDeleteHook); ok {
-			if err := hook.BeforeDelete(); err != nil {
-				message.Status = "error"
-				message.Code = 400
-				message.Message = "Data update error, please contact adminstrator"
-				message.MessageErr = err
-				return
-			}
-		}
-
-		if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeDelete, &data); err.HasError() {
-			message.Status = "error"
-			message.Code = 400
-			message.MessageErr = err.MessageErr
-			return
-		}
-
-		id, err := primitive.ObjectIDFromHex(string(delete_message.Id))
-		if err != nil {
-			message.Status = "error"
-			message.Code = 400
-			message.Message = "Data create error, please contact adminstrator"
-			return
-		}
-
-		_, err = db.Collection(r.collectionName).UpdateOne(
-			context.Background(),
-			bson.M{"_id": id},
-			bson.M{
-				"$set": bson.M{
-					"deleted_at":    time.Now().UTC(),
-					"delete_reason": delete_message.DeleteReason,
-					"is_deleted":    true,
-				},
-			},
-		)
-		if err != nil {
-			message.Status = "error"
-			message.Code = 400
-			message.Message = "Delete error, please contact adminstrator"
-			return
-		}
-
-		if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterDelete, &data); err.HasError() {
-			message.Status = "error"
-			message.Code = 400
-			message.MessageErr = err.MessageErr
-			return
-		}
-
-		message.Status = "success"
-		message.Code = 200
-		message.Message = "Delete successfuly!"
-	case *gorm.DB:
-		_ = db
+func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message types.DeletePost) (message types.Message) {
+	opts_filter := &filter.FilterOptions{AliasField: r.alias}
+	if r.timezone != "" {
+		opts_filter.SetTimezone(r.timezone)
 	}
-	return
+	var err error
+	err = filter.ParseBracketParams(filter_str, opts_filter)
+	if err != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       400,
+			Message:    "Unable to parse: an object hierarchy has been provided",
+			MessageErr: err,
+			ErrorCode:  types.ErrSystemParseFilter,
+		}
+	}
+	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeDelete, &delete_message); err.HasError() {
+		return err
+	}
+	if _, ok := any(&delete_message).(hooks.HasDeletePost); ok {
+		if delete_message.AfterApprove {
+			if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterApprove, &delete_message); err.HasError() {
+				return err
+			}
+		}
+	}
+	var resulf int64
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
+		}
+	}
+	if err != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       400,
+			Message:    "Data delete error, please contact adminstrator",
+			MessageErr: err,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterDelete, &delete_message); err.HasError() {
+		return err
+	}
+	if r.isReturn {
+		return types.Message{
+			Status:  "success",
+			Code:    200,
+			Message: "Delete successfuly!",
+			// Data:    resulf,
+		}
+	}
+	return types.Message{
+		Status:  "success",
+		Code:    200,
+		Message: "Delete successfuly!",
+	}
 }
 
 func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Message) {
@@ -417,11 +405,15 @@ func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Mess
 		message.ErrorCode = types.ErrSystemParseFilter
 		return message
 	}
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	return types.Message{
 		Status: "success",
@@ -447,11 +439,15 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 		}
 	}
 
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	return types.Message{
 		Status:    "success",
@@ -462,22 +458,16 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 	}
 }
 
-func (r *genericRepository[T]) Aggregate(filter []bson.M) (message types.Message) {
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
-	}
-	return
-}
-
 func (r *genericRepository[T]) UpdateMany(filterStr string, data map[string]any) (message types.Message) {
-	switch db := r.db.(type) {
-	case *mongo.Database:
-		_ = db
-	case *gorm.DB:
-		_ = db
+	if dbConn := config.GetActiveConnection(); dbConn != nil {
+		switch dbConn.Type() {
+		case config.DBTypeMongo:
+			db := dbConn.Mongo()
+			_ = db // TODO: use db
+		case config.DBTypeGorm:
+			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		}
 	}
 	return
 }

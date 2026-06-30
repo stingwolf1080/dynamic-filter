@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/stingwolf1080/dynamic-filter/pkg/util/types"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 type Repository[T any] interface {
@@ -16,12 +15,12 @@ type Repository[T any] interface {
 	GetByFilter(filter string) (message types.Message)
 	CheckFilter(filter string) (message types.Message)
 	ListPage(filter string) (message types.Message)
-	Aggregate(filter []bson.M) (message types.Message)
+	// Aggregate(filter []bson.M) (message types.Message)
 	// handle default data
 	SetRespone(data any)
 	SetIsReturn()
 	SetTimezone(zone string)
-	SetID(id types.ID)
+	// SetID(id types.ID)
 	// register func hook
 	RegisterHandle(name string, fn func(ctx context.Context, data any, prefix string) types.Message)
 	RegisterModel()
