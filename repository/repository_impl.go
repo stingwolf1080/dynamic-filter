@@ -109,6 +109,9 @@ func (r *genericRepository[T]) Create(data T) (message types.Message) {
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &data); err.HasError() {
@@ -170,6 +173,9 @@ func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
 			_ = db // TODO: use db
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
 			_ = db // TODO: use db
 		}
 	}
@@ -265,6 +271,9 @@ func (r *genericRepository[T]) Update(data T) (message types.Message) {
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterUpdate, &data); err.HasError() {
@@ -305,6 +314,9 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 			_ = db // TODO: use db
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
+			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
 			_ = db // TODO: use db
 		}
 	}
@@ -351,7 +363,7 @@ func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message type
 			}
 		}
 	}
-	var resulf int64
+
 	if dbConn := config.GetActiveConnection(); dbConn != nil {
 		switch dbConn.Type() {
 		case config.DBTypeMongo:
@@ -360,7 +372,9 @@ func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message type
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
-		}
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
 	if err != nil {
@@ -413,6 +427,9 @@ func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Mess
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
 	return types.Message{
@@ -447,6 +464,9 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
 	return types.Message{
@@ -467,7 +487,47 @@ func (r *genericRepository[T]) UpdateMany(filterStr string, data map[string]any)
 		case config.DBTypeGorm:
 			db := dbConn.Gorm()
 			_ = db // TODO: use db
+		case config.DBTypeSqlc:
+			db := dbConn.Sqlc()
+			_ = db // TODO: use db
 		}
 	}
-	return
+	if len(data) <= 0 {
+		return util.ErrorMessage{
+			Status:  "error",
+			Code:    400,
+			Message: "Data update error, please contact adminstrator",
+		}
+	}
+	collecion.Data = data
+
+	opts_filter := &util.FilterOptions{AliasField: r.alias}
+	if r.timezone != "" {
+		opts_filter.SetTimezone(r.timezone)
+	}
+	var err error
+	err = util.ParseBracketParams(filter, opts_filter)
+	if err != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       400,
+			Message:    "Unable to parse: an object hierarchy has been provided",
+			MessageErr: err,
+		}
+	}
+	collecion.Filter = opts_filter
+	err = collecion.UpdateMany()
+	if err != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       400,
+			Message:    "Data update error, please contact adminstrator",
+			MessageErr: err,
+		}
+	}
+	return types.Message{
+		Status:  "success",
+		Code:    200,
+		Message: "Update successfuly!",
+	}
 }

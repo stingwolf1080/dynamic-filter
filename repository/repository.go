@@ -29,7 +29,7 @@ type Repository[T any] interface {
 	// new func update many
 	UpdateMany(filter string, data map[string]any) (message types.Message)
 	CreateMany(data []T) (message types.Message)
-	DeleteBy(data T) (message types.Message)
+	DeleteMany(filter string, delete_message types.DeletePost) (message types.Message)
 }
 
 type GenericDeleter interface {
