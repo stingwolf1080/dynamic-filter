@@ -60,6 +60,10 @@ func (f FilterOptions) LastId() bool {
 	return false
 }
 
+func (f FilterOptions) NextId() string {
+	return f.Page.LastId
+}
+
 func (f FilterOptions) Pagination() bool {
 	return f.pagination
 }

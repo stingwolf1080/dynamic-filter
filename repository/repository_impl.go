@@ -2,14 +2,17 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"math"
 
 	hooks "github.com/stingwolf1080/dynamic-filter/hook"
-	"github.com/stingwolf1080/dynamic-filter/pkg/config"
 	"github.com/stingwolf1080/dynamic-filter/pkg/filter"
 	"github.com/stingwolf1080/dynamic-filter/pkg/helper"
 	"github.com/stingwolf1080/dynamic-filter/pkg/mongox"
 	"github.com/stingwolf1080/dynamic-filter/pkg/util/types"
+	"go.mongodb.org/mongo-driver/mongo"
+	"gorm.io/gorm"
 )
 
 type genericRepository[T any] struct {
@@ -69,6 +72,32 @@ func (r *genericRepository[T]) SetTimezone(zone string) {
 	r.timezone = zone
 }
 
+func (r *genericRepository[T]) executeDBHooks(
+	mongoFn func(db *mongo.Client) error,
+	gormFn func(db *gorm.DB) error,
+	sqlcFn func(db *sql.DB) error,
+) error {
+	dbConn := config.GetActiveConnection()
+	if dbConn == nil {
+		return errors.New("no active database connection")
+	}
+	switch dbConn.Type() {
+	case config.DBTypeMongo:
+		if mongoFn != nil {
+			return mongoFn(dbConn.Mongo())
+		}
+	case config.DBTypeGorm:
+		if gormFn != nil {
+			return gormFn(dbConn.Gorm())
+		}
+	case config.DBTypeSqlc:
+		if sqlcFn != nil {
+			return sqlcFn(dbConn.Sqlc())
+		}
+	}
+	return nil
+}
+
 func (r *genericRepository[T]) RegisterHandle(name string, fn func(ctx context.Context, data any, prefix string) types.Message) {
 	registerHandle(r.modelName, name, fn)
 }
@@ -101,19 +130,21 @@ func (r *genericRepository[T]) Create(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &data); err.HasError() {
 		return err
 	}
@@ -166,19 +197,21 @@ func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
 			}
 		}
 	}
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	for k, _data := range data {
 		if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &_data); err.HasError() {
 			return err
@@ -263,19 +296,21 @@ func (r *genericRepository[T]) Update(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterUpdate, &data); err.HasError() {
 		return err
 	}
@@ -307,19 +342,21 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 			return err
 		}
 	}
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterDelete, &delete_message); err.HasError() {
 		return err
 	}
@@ -364,19 +401,21 @@ func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message type
 		}
 	}
 
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	if err != nil {
 		return types.Message{
 			Status:     "error",
@@ -419,19 +458,21 @@ func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Mess
 		message.ErrorCode = types.ErrSystemParseFilter
 		return message
 	}
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	return types.Message{
 		Status: "success",
 		Code:   200,
@@ -456,19 +497,21 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 		}
 	}
 
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	return types.Message{
 		Status:    "success",
 		Code:      200,
@@ -479,19 +522,21 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 }
 
 func (r *genericRepository[T]) UpdateMany(filterStr string, data map[string]any) (message types.Message) {
-	if dbConn := config.GetActiveConnection(); dbConn != nil {
-		switch dbConn.Type() {
-		case config.DBTypeMongo:
-			db := dbConn.Mongo()
+	errDB := r.executeDBHooks(
+		func(db *mongo.Client) error {
 			_ = db // TODO: use db
-		case config.DBTypeGorm:
-			db := dbConn.Gorm()
+			return nil
+		},
+		func(db *gorm.DB) error {
 			_ = db // TODO: use db
-		case config.DBTypeSqlc:
-			db := dbConn.Sqlc()
+			return nil
+		},
+		func(db *sql.DB) error {
 			_ = db // TODO: use db
-		}
-	}
+			return nil
+		},
+	)
+	_ = errDB
 	if len(data) <= 0 {
 		return util.ErrorMessage{
 			Status:  "error",
