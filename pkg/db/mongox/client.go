@@ -18,24 +18,34 @@ func (c *Conn) Connect(opts db.Options) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(opts.URI))
+	clientOptions := options.Client().ApplyURI(opts.URI)
+	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		return err
 	}
 
-	if err := client.Ping(ctx, nil); err != nil {
+	err = client.Ping(ctx, nil)
+	if err != nil {
 		return err
 	}
 
 	c.Client = client
-	c.Database = client.Database(opts.Database)
+	if opts.Database != "" {
+		c.Database = client.Database(opts.Database)
+	}
 
 	return nil
 }
 
 func (c *Conn) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	if c.Client != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return c.Client.Disconnect(ctx)
+	}
+	return nil
+}
 
-	return c.Client.Disconnect(ctx)
+func (c *Conn) CheckNotFound() error {
+	return mongo.ErrNoDocuments
 }

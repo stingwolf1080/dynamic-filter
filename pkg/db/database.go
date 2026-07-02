@@ -5,7 +5,7 @@ import (
 )
 
 type Connection interface {
-	Connect() error
+	Connect(opts Options) error
 	Create(model any, table string) error
 	CreateMany(model []any, table string) error
 	Read(filters filter.FilterOptions, table string, result any) error

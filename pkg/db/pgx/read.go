@@ -55,7 +55,7 @@ func (c *Conn) Count(filters filter.FilterOptions, table string) error {
 	// But where does the count go? If it returns an error, there's no int64 return type.
 	// Since mongox implementation had Count returning (int64, error), this implies
 	// a mismatch with db.Connection. We will execute the query but without a target
-	// pointer in the interface, we cannot return the value. 
+	// pointer in the interface, we cannot return the value.
 	// We'll execute the count internally to ensure valid syntax.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -66,8 +66,4 @@ func (c *Conn) Count(filters filter.FilterOptions, table string) error {
 	var count int64
 	err := c.Pool.QueryRow(ctx, query, args...).Scan(&count)
 	return err
-}
-
-func (c *Conn) CheckNotFound() error {
-	return nil // To be implemented based on the caller's logic
 }

@@ -4,30 +4,25 @@ import (
 	"context"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/stingwolf1080/dynamic-filter/pkg/filter"
 )
 
-func (conn *Conn) DeleteOne(filter bson.M, table string, opts *options.DeleteOptions) error {
-	var err error
+func (conn *Conn) Delete(filters filter.FilterOptions, table string) error {
 	dataCollection := conn.Database.Collection(table)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = dataCollection.DeleteOne(ctx, filter, opts)
-	if err != nil {
-		return err
-	}
-	return nil
+
+	f := convertFilter(false, &filters)
+	_, err := dataCollection.DeleteOne(ctx, f)
+	return err
 }
 
-func (conn *Conn) DeleteMany(filter bson.M, table string, opts *options.DeleteOptions) error {
-	var err error
+func (conn *Conn) DeleteMany(filters filter.FilterOptions, table string) error {
 	dataCollection := conn.Database.Collection(table)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = dataCollection.DeleteMany(ctx, filter, opts)
-	if err != nil {
-		return err
-	}
-	return nil
+
+	f := convertFilter(false, &filters)
+	_, err := dataCollection.DeleteMany(ctx, f)
+	return err
 }

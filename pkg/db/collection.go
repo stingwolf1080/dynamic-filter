@@ -6,8 +6,8 @@ type Wrapper struct {
 	conn Connection
 }
 
-func (w *Wrapper) Connect() error {
-	return w.conn.Connect()
+func (w *Wrapper) Connect(opts Options) error {
+	return w.conn.Connect(opts)
 }
 
 func (w *Wrapper) Create(model any, table string) error {

@@ -35,3 +35,7 @@ func (c *Conn) Close() error {
 	}
 	return nil
 }
+
+func (c *Conn) CheckNotFound() error {
+	return db.ErrNotFound
+}

@@ -6,23 +6,19 @@ import (
 )
 
 func (conn *Conn) Create(data any, table string) error {
-	var err error
 	dataCollection := conn.Database.Collection(table)
-	ctx, _ := context.WithTimeout(context.Background(), 60*time.Second)
-	_, err = dataCollection.InsertOne(ctx, data)
-	if err != nil {
-		return err
-	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := dataCollection.InsertOne(ctx, data)
+	return err
 }
 
 func (conn *Conn) CreateMany(data []any, table string) error {
-	var err error
 	dataCollection := conn.Database.Collection(table)
-	ctx, _ := context.WithTimeout(context.Background(), 60*time.Second)
-	_, err = dataCollection.InsertMany(ctx, data)
-	if err != nil {
-		return err
-	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := dataCollection.InsertMany(ctx, data)
+	return err
 }

@@ -2,20 +2,18 @@ package repository
 
 import (
 	"context"
-	"database/sql"
-	"errors"
+	"fmt"
 	"math"
 
 	hooks "github.com/stingwolf1080/dynamic-filter/hook"
+	"github.com/stingwolf1080/dynamic-filter/pkg/db"
 	"github.com/stingwolf1080/dynamic-filter/pkg/filter"
 	"github.com/stingwolf1080/dynamic-filter/pkg/helper"
 	"github.com/stingwolf1080/dynamic-filter/pkg/mongox"
 	"github.com/stingwolf1080/dynamic-filter/pkg/util/types"
-	"go.mongodb.org/mongo-driver/mongo"
-	"gorm.io/gorm"
 )
 
-type genericRepository[T any] struct {
+type repository[T any] struct {
 	collectionName string
 	modelName      string
 	prefix         string
@@ -24,19 +22,25 @@ type genericRepository[T any] struct {
 	isReturn       bool
 	timezone       string
 	response       any
+	dbConn         db.Connection
+	// queryCache     *cache.Cache
 }
 
-func NewGenericRepository[T any](collectionName string) Repository[T] {
+func NewRepository[T any](dbConn db.Connection, restrict map[string]bool, alias map[string]string) Repository[T] {
 	modelName := helper.GetNameModel[T]()
-	return &genericRepository[T]{
-		collectionName: collectionName,
+	r := &repository[T]{
+		collectionName: helper.GetModelTableGeneric[T](),
 		modelName:      modelName,
-		restrict:       make(map[string]bool),
-		alias:          make(map[string]string),
+		restrict:       restrict,
+		alias:          alias,
+		dbConn:         dbConn,
+		// queryCache:     cache.NewCache(),
 	}
+	RegisterDeleteFunc(modelName, r)
+	return r
 }
 
-func (r *genericRepository[T]) CheckFilter(filterStr string) (message types.Message) {
+func (r *repository[T]) CheckFilter(filterStr string) (message types.Message) {
 	opts_filter := &filter.FilterOptions{RestrictField: r.restrict}
 	err := filter.ParseBracketParams(filterStr, opts_filter)
 	if err != nil {
@@ -51,66 +55,47 @@ func (r *genericRepository[T]) CheckFilter(filterStr string) (message types.Mess
 	return
 }
 
-func (r *genericRepository[T]) SetPrefix(prefix string) {
+func (r *repository[T]) SetPrefix(prefix string) {
 	r.prefix = prefix
 }
 
-func (r *genericRepository[T]) NewEntity() T {
+func (r *repository[T]) NewEntity() T {
 	var entity T
 	return entity
 }
 
-func (r *genericRepository[T]) SetRespone(data any) {
+func (r *repository[T]) SetRespone(data any) {
 	r.response = data
 }
 
-func (r *genericRepository[T]) SetIsReturn() {
+func (r *repository[T]) SetIsReturn() {
 	r.isReturn = true
 }
 
-func (r *genericRepository[T]) SetTimezone(zone string) {
+func (r *repository[T]) GetCollection() string {
+	if r.prefix == "" {
+		return r.collectionName
+	}
+	return r.prefix + "_" + r.collectionName
+}
+
+func (r *repository[T]) SetTimezone(zone string) {
 	r.timezone = zone
 }
 
-func (r *genericRepository[T]) executeDBHooks(
-	mongoFn func(db *mongo.Client) error,
-	gormFn func(db *gorm.DB) error,
-	sqlcFn func(db *sql.DB) error,
-) error {
-	dbConn := config.GetActiveConnection()
-	if dbConn == nil {
-		return errors.New("no active database connection")
-	}
-	switch dbConn.Type() {
-	case config.DBTypeMongo:
-		if mongoFn != nil {
-			return mongoFn(dbConn.Mongo())
-		}
-	case config.DBTypeGorm:
-		if gormFn != nil {
-			return gormFn(dbConn.Gorm())
-		}
-	case config.DBTypeSqlc:
-		if sqlcFn != nil {
-			return sqlcFn(dbConn.Sqlc())
-		}
-	}
-	return nil
-}
-
-func (r *genericRepository[T]) RegisterHandle(name string, fn func(ctx context.Context, data any, prefix string) types.Message) {
+func (r *repository[T]) RegisterHandle(name string, fn func(ctx context.Context, data any, prefix string) types.Message) {
 	registerHandle(r.modelName, name, fn)
 }
 
-func (r *genericRepository[T]) RegisterModel() {
+func (r *repository[T]) RegisterModel() {
 	mongox.Register(r.NewEntity(), true)
 }
 
-func (r *genericRepository[T]) CallFunc(name string, data any) (message types.Message) {
+func (r *repository[T]) CallFunc(name string, data any) (message types.Message) {
 	return callFunc(context.Background(), r.modelName, r.prefix, name, data)
 }
 
-func (r *genericRepository[T]) Create(data T) (message types.Message) {
+func (r *repository[T]) Create(data T) (message types.Message) {
 	if hook, ok := any(&data).(hooks.BeforeInsertHook); ok {
 		if err := hook.BeforeInsert(); err != nil {
 			return types.Message{
@@ -130,21 +115,16 @@ func (r *genericRepository[T]) Create(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+	if errDB := r.dbConn.Create(&data, r.GetCollection()); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database create failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	// r.queryCache.Clear()
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &data); err.HasError() {
 		return err
 	}
@@ -166,7 +146,7 @@ func (r *genericRepository[T]) Create(data T) (message types.Message) {
 	}
 }
 
-func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
+func (r *repository[T]) CreateMany(data []T) (message types.Message) {
 	var docs []any
 	var ids []types.ID
 	for k, _data := range data {
@@ -197,21 +177,16 @@ func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
 			}
 		}
 	}
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+	if errDB := r.dbConn.CreateMany(docs, r.collectionName); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database create many failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	// r.queryCache.Clear()
 	for k, _data := range data {
 		if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterInsert, &_data); err.HasError() {
 			return err
@@ -248,7 +223,7 @@ func (r *genericRepository[T]) CreateMany(data []T) (message types.Message) {
 	}
 }
 
-func (r *genericRepository[T]) Update(data T) (message types.Message) {
+func (r *repository[T]) Update(data T) (message types.Message) {
 	var r_id types.ID
 	var none_id bool
 	if hook, ok := any(&data).(hooks.HasID); ok {
@@ -296,21 +271,26 @@ func (r *genericRepository[T]) Update(data T) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeSave, &data); err.HasError() {
 		return err
 	}
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+	opts_filter := filter.FilterOptions{}
+	if !none_id && !r_id.IsZero() {
+		opts_filter.Filter = map[string]filter.Filter{
+			"id": {
+				Value: []filter.OperatorFilter{
+					{Field: "id", Operator: "eq", Value: fmt.Sprint(r_id.Val)},
+				},
+			},
+		}
+	}
+	if errDB := r.dbConn.Update(opts_filter, &data, r.collectionName); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database update failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	// r.queryCache.Clear()
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterUpdate, &data); err.HasError() {
 		return err
 	}
@@ -332,7 +312,7 @@ func (r *genericRepository[T]) Update(data T) (message types.Message) {
 	}
 }
 
-func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message types.Message) {
+func (r *repository[T]) Delete(delete_message types.DeletePost) (message types.Message) {
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.BeforeDelete, &delete_message); err.HasError() {
 		return err
 	}
@@ -342,21 +322,25 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 			return err
 		}
 	}
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
+	opts_filter := filter.FilterOptions{
+		Filter: map[string]filter.Filter{
+			"id": {
+				Value: []filter.OperatorFilter{
+					{Field: "id", Operator: "eq", Value: string(delete_message.Id)},
+				},
+			},
 		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+	}
+	if errDB := r.dbConn.Delete(opts_filter, r.collectionName); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database delete failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	// r.queryCache.Clear()
 	if err := hooks.Run(context.Background(), r.modelName, r.prefix, hooks.AfterDelete, &delete_message); err.HasError() {
 		return err
 	}
@@ -374,7 +358,7 @@ func (r *genericRepository[T]) Delete(delete_message types.DeletePost) (message 
 	}
 }
 
-func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message types.DeletePost) (message types.Message) {
+func (r *repository[T]) DeleteMany(filter_str string, delete_message types.DeletePost) (message types.Message) {
 	opts_filter := &filter.FilterOptions{AliasField: r.alias}
 	if r.timezone != "" {
 		opts_filter.SetTimezone(r.timezone)
@@ -401,21 +385,16 @@ func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message type
 		}
 	}
 
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+	if errDB := r.dbConn.DeleteMany(*opts_filter, r.collectionName); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database delete many failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+	// r.queryCache.Clear()
 	if err != nil {
 		return types.Message{
 			Status:     "error",
@@ -443,7 +422,11 @@ func (r *genericRepository[T]) DeleteMany(filter_str string, delete_message type
 	}
 }
 
-func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Message) {
+func (r *repository[T]) GetByFilter(filterStr string) (message types.Message) {
+	// if val, ok := r.queryCache.Get("get:" + filterStr); ok {
+	// 	return val.(types.Message)
+	// }
+
 	opts_filter := &filter.FilterOptions{AliasField: r.alias}
 	if r.timezone != "" {
 		opts_filter.SetTimezone(r.timezone)
@@ -458,29 +441,35 @@ func (r *genericRepository[T]) GetByFilter(filterStr string) (message types.Mess
 		message.ErrorCode = types.ErrSystemParseFilter
 		return message
 	}
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
-	return types.Message{
+	var result any = r.response
+	if result == nil {
+		var defaultResult []T
+		result = &defaultResult
+		r.response = &defaultResult
+	}
+	if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
+		message.Status = "error"
+		message.Code = 500
+		message.Message = "Database read failed"
+		message.MessageErr = errDB
+		message.ErrorCode = types.ErrSystemDatabase
+		return message
+	}
+
+	msg := types.Message{
 		Status: "success",
 		Code:   200,
 		Data:   r.response,
 	}
+	// r.queryCache.Set("get:"+filterStr, msg)
+	return msg
 }
 
-func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message) {
+func (r *repository[T]) ListPage(filterStr string) (message types.Message) {
+	// if val, ok := r.queryCache.Get("list:" + filterStr); ok {
+	// 	return val.(types.Message)
+	// }
+
 	opts_filter := &filter.FilterOptions{AliasField: r.alias}
 	opts_filter.SetPagination()
 	if r.timezone != "" {
@@ -497,79 +486,70 @@ func (r *genericRepository[T]) ListPage(filterStr string) (message types.Message
 		}
 	}
 
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
-	return types.Message{
+	var result any = r.response
+	if result == nil {
+		var defaultResult []T
+		result = &defaultResult
+		r.response = &defaultResult
+	}
+	if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
+		return types.Message{
+			Status:     "error",
+			Code:       500,
+			Message:    "Database read failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
+		}
+	}
+
+	msg := types.Message{
 		Status:    "success",
 		Code:      200,
 		Data:      r.response,
 		TotalRow:  100,
 		TotalPage: int64(math.Ceil(float64(100) / float64(opts_filter.Limit()))),
 	}
+	// r.queryCache.Set("list:"+filterStr, msg)
+	return msg
 }
 
-func (r *genericRepository[T]) UpdateMany(filterStr string, data map[string]any) (message types.Message) {
-	errDB := r.executeDBHooks(
-		func(db *mongo.Client) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *gorm.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-		func(db *sql.DB) error {
-			_ = db // TODO: use db
-			return nil
-		},
-	)
-	_ = errDB
+func (r *repository[T]) UpdateMany(filterStr string, data map[string]any) (message types.Message) {
 	if len(data) <= 0 {
-		return util.ErrorMessage{
+		return types.Message{
 			Status:  "error",
 			Code:    400,
 			Message: "Data update error, please contact adminstrator",
 		}
 	}
-	collecion.Data = data
 
-	opts_filter := &util.FilterOptions{AliasField: r.alias}
+	opts_filter := filter.FilterOptions{AliasField: r.alias}
 	if r.timezone != "" {
 		opts_filter.SetTimezone(r.timezone)
 	}
-	var err error
-	err = util.ParseBracketParams(filter, opts_filter)
+
+	err := filter.ParseBracketParams(filterStr, &opts_filter)
 	if err != nil {
 		return types.Message{
 			Status:     "error",
 			Code:       400,
-			Message:    "Unable to parse: an object hierarchy has been provided",
+			Message:    "Unable to parse filter",
 			MessageErr: err,
+			ErrorCode:  types.ErrSystemParseFilter,
 		}
 	}
-	collecion.Filter = opts_filter
-	err = collecion.UpdateMany()
-	if err != nil {
+
+	if errDB := r.dbConn.UpdateMany(opts_filter, data, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       400,
-			Message:    "Data update error, please contact adminstrator",
-			MessageErr: err,
+			Code:       500,
+			Message:    "Database update many failed",
+			MessageErr: errDB,
+			ErrorCode:  types.ErrSystemDatabase,
 		}
 	}
+
+	// r.queryCache.Clear()
+
 	return types.Message{
 		Status:  "success",
 		Code:    200,

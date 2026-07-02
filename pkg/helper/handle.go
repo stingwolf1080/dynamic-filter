@@ -118,6 +118,12 @@ func GetModelTable(myvar interface{}) string {
 	return tblname
 }
 
+func GetModelTableGeneric[T any]() string {
+	name := GetNameModel[T]()
+	modeltbl := Underscore(name)
+	return inflection.Plural(modeltbl)
+}
+
 func GetModelTableFromString(name string) string {
 	modeltbl := Underscore(name)
 	tblname := inflection.Plural(modeltbl)

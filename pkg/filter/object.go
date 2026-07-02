@@ -34,6 +34,10 @@ type FilterOptions struct {
 	timezone      string            `json:"-"`
 }
 
+func (f *FilterOptions) GetQueryString() string {
+	return f.qs
+}
+
 type FieldProjection struct {
 	FieldName string `json:"field_name"`
 	IsValue   bool   `json:"is_value"`
