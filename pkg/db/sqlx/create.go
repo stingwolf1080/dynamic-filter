@@ -99,3 +99,29 @@ func (c *Conn) buildInsertQuery(model any, table string) (string, []any, error) 
 
 	return query, args, nil
 }
+
+func (c *Conn) CreateTextIndex(table string, fields []string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	indexName := fmt.Sprintf("idx_%s_text", table)
+	driver := c.DB.DriverName()
+	var query string
+
+	if driver == "postgres" || driver == "pgx" || driver == "pq-timeouts" || driver == "pq" {
+		var coalesceFields []string
+		for _, field := range fields {
+			coalesceFields = append(coalesceFields, fmt.Sprintf("coalesce(%s::text, '')", field))
+		}
+		tsVectorExpr := fmt.Sprintf("to_tsvector('simple', %s)", strings.Join(coalesceFields, " || ' ' || "))
+		query = fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s USING GIN (%s)", indexName, table, tsVectorExpr)
+	} else {
+		query = fmt.Sprintf("CREATE FULLTEXT INDEX %s ON %s (%s)", indexName, table, strings.Join(fields, ", "))
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	_, err := c.DB.ExecContext(ctx, query)
+	return err
+}

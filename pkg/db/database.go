@@ -16,5 +16,6 @@ type Connection interface {
 	DeleteMany(filters filter.FilterOptions, table string) error
 	Count(filters filter.FilterOptions, table string) error
 	CheckNotFound() error
+	CreateTextIndex(table string, fields []string) error
 	Close() error
 }

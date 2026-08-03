@@ -96,3 +96,24 @@ func extractFieldsAndValues(model any) ([]string, []any) {
 
 	return cols, vals
 }
+
+func (c *Conn) CreateTextIndex(table string, fields []string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	indexName := fmt.Sprintf("idx_%s_text", table)
+	
+	var coalesceFields []string
+	for _, field := range fields {
+		coalesceFields = append(coalesceFields, fmt.Sprintf("coalesce(%s::text, '')", field))
+	}
+	tsVectorExpr := fmt.Sprintf("to_tsvector('simple', %s)", strings.Join(coalesceFields, " || ' ' || "))
+
+	query := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s USING GIN (%s)", indexName, table, tsVectorExpr)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	_, err := c.Pool.Exec(ctx, query)
+	return err
+}

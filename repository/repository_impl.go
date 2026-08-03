@@ -23,17 +23,42 @@ type repository[T any] struct {
 	timezone       string
 	response       any
 	dbConn         db.Connection
+	modelTags      helper.ModelTags
 	// queryCache     *cache.Cache
 }
 
 func NewRepository[T any](dbConn db.Connection, restrict map[string]bool, alias map[string]string) Repository[T] {
 	modelName := helper.GetNameModel[T]()
+	var t T
+	modelTags := helper.GetModelTags(t)
+
+	if alias == nil {
+		alias = make(map[string]string)
+	}
+
+	for fieldName, bsonTag := range modelTags.BsonTags {
+		jsonTag := modelTags.JsonTags[fieldName]
+		if jsonTag != "" && bsonTag != "" && jsonTag != bsonTag {
+			if _, exists := alias[jsonTag]; !exists {
+				alias[jsonTag] = bsonTag
+			}
+		}
+	}
+
+	for fieldName, aliasTag := range modelTags.AliasTags {
+		jsonTag := modelTags.JsonTags[fieldName]
+		if jsonTag != "" && aliasTag != "" {
+			alias[jsonTag] = aliasTag
+		}
+	}
+
 	r := &repository[T]{
 		collectionName: helper.GetModelTableGeneric[T](),
 		modelName:      modelName,
 		restrict:       restrict,
 		alias:          alias,
 		dbConn:         dbConn,
+		modelTags:      modelTags,
 		// queryCache:     cache.NewCache(),
 	}
 	RegisterDeleteFunc(modelName, r)
@@ -41,7 +66,7 @@ func NewRepository[T any](dbConn db.Connection, restrict map[string]bool, alias 
 }
 
 func (r *repository[T]) CheckFilter(filterStr string) (message types.Message) {
-	opts_filter := &filter.FilterOptions{RestrictField: r.restrict}
+	opts_filter := &filter.FilterOptions{RestrictField: r.restrict, AliasField: r.alias}
 	err := filter.ParseBracketParams(filterStr, opts_filter)
 	if err != nil {
 		message.Status = "error"
@@ -118,7 +143,7 @@ func (r *repository[T]) Create(data T) (message types.Message) {
 	if errDB := r.dbConn.Create(&data, r.GetCollection()); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database create failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -180,7 +205,7 @@ func (r *repository[T]) CreateMany(data []T) (message types.Message) {
 	if errDB := r.dbConn.CreateMany(docs, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database create many failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -284,7 +309,7 @@ func (r *repository[T]) Update(data T) (message types.Message) {
 	if errDB := r.dbConn.Update(opts_filter, &data, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database update failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -334,7 +359,7 @@ func (r *repository[T]) Delete(delete_message types.DeletePost) (message types.M
 	if errDB := r.dbConn.Delete(opts_filter, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database delete failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -388,7 +413,7 @@ func (r *repository[T]) DeleteMany(filter_str string, delete_message types.Delet
 	if errDB := r.dbConn.DeleteMany(*opts_filter, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database delete many failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -449,7 +474,7 @@ func (r *repository[T]) GetByFilter(filterStr string) (message types.Message) {
 	}
 	if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
 		message.Status = "error"
-		message.Code = 500
+		message.Code = 400
 		message.Message = "Database read failed"
 		message.MessageErr = errDB
 		message.ErrorCode = types.ErrSystemDatabase
@@ -495,7 +520,7 @@ func (r *repository[T]) ListPage(filterStr string) (message types.Message) {
 	if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database read failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -541,7 +566,7 @@ func (r *repository[T]) UpdateMany(filterStr string, data map[string]any) (messa
 	if errDB := r.dbConn.UpdateMany(opts_filter, data, r.collectionName); errDB != nil {
 		return types.Message{
 			Status:     "error",
-			Code:       500,
+			Code:       400,
 			Message:    "Database update many failed",
 			MessageErr: errDB,
 			ErrorCode:  types.ErrSystemDatabase,
@@ -555,4 +580,8 @@ func (r *repository[T]) UpdateMany(filterStr string, data map[string]any) (messa
 		Code:    200,
 		Message: "Update successfuly!",
 	}
+}
+
+func (r *repository[T]) CreateTextIndex(fields ...string) error {
+	return r.dbConn.CreateTextIndex(r.collectionName, fields)
 }
