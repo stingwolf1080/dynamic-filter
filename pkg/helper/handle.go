@@ -197,3 +197,14 @@ func IsEmail(s string) bool {
 func IsUsername(s string) bool {
 	return usernameRegex.MatchString(s)
 }
+func IsPointerAnArray(value interface{}) bool {
+	v := reflect.ValueOf(value)
+	if v.Kind() != reflect.Ptr {
+		return false // value is not pointer
+	}
+	elem := v.Elem()
+	if elem.Kind() == reflect.Array || elem.Kind() == reflect.Slice {
+		return true
+	}
+	return false
+}

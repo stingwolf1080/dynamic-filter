@@ -472,13 +472,24 @@ func (r *repository[T]) GetByFilter(filterStr string) (message types.Message) {
 		result = &defaultResult
 		r.response = &defaultResult
 	}
-	if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
-		message.Status = "error"
-		message.Code = 400
-		message.Message = "Database read failed"
-		message.MessageErr = errDB
-		message.ErrorCode = types.ErrSystemDatabase
-		return message
+	if helper.IsPointerAnArray(r.response) {
+		if errDB := r.dbConn.ReadMany(*opts_filter, r.collectionName, result); errDB != nil {
+			message.Status = "error"
+			message.Code = 400
+			message.Message = "Database read failed"
+			message.MessageErr = errDB
+			message.ErrorCode = types.ErrSystemDatabase
+			return message
+		}
+	} else {
+		if errDB := r.dbConn.Read(*opts_filter, r.collectionName, result); errDB != nil {
+			message.Status = "error"
+			message.Code = 400
+			message.Message = "Database read failed"
+			message.MessageErr = errDB
+			message.ErrorCode = types.ErrSystemDatabase
+			return message
+		}
 	}
 
 	msg := types.Message{
