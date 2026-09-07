@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
@@ -53,6 +54,26 @@ func (id ID) IsZero() bool {
 		return v == 0
 	default:
 		return false
+	}
+}
+
+func (id ID) String() string {
+	if id.Val == nil {
+		return ""
+	}
+	switch v := id.Val.(type) {
+	case ObjectID:
+		return v.String()
+	case primitive.ObjectID:
+		return v.Hex()
+	case uuid.UUID:
+		return v.String()
+	case string:
+		return v
+	case int, int32, int64:
+		return fmt.Sprintf("%d", v)
+	default:
+		return ""
 	}
 }
 
