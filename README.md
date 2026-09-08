@@ -16,6 +16,9 @@ For ID reference checking and dependency hydration before persistence, see the [
 - [Full-text Search (`search`)](#full-text-search-search)
 - [Grouping (`group_by`)](#grouping-group_by)
 - [Example Usage](#example-usage)
+- [Dependency Resolver](#dependency-resolver)
+  - [1. Resolve trực tiếp](#1-resolve-trực-tiếp)
+  - [2. Resolve tự động trước khi save](#2-resolve-tự-động-trước-khi-save)
 - [Benchmarks](#benchmarks)
 
 ---
@@ -173,6 +176,97 @@ func main() {
 	}
 }
 ```
+
+## Dependency Resolver
+
+Dependency Resolver kiểm tra ID được khai báo bằng tag `ref` và có thể gắn data trả về vào chính struct hiện tại trước khi lưu DB. Hướng dẫn chi tiết hơn ở [pkg/resolver/README.md](pkg/resolver/README.md).
+
+Khai báo model một lần:
+
+```go
+type Route struct {
+    ID   string `json:"id" bson:"id"`
+    Name string `json:"name" bson:"name"`
+}
+
+type Schedule struct {
+    RouteID string `json:"route_id" bson:"route_id" ref:"route,required,into=Route"`
+    Route   Route  `json:"route,omitempty" bson:"route,omitempty"`
+}
+```
+
+Đăng ký resolver tại application startup. `prefix` được dùng trong phase check/query để lấy đúng tenant/table/collection:
+
+```go
+registry := resolver.NewRegistry()
+
+must(registry.Register("route", func(
+    ctx context.Context,
+    data any,
+    prefix string,
+) types.Message {
+    schedule := data.(*Schedule)
+
+    route, err := routeRepo.FindByID(ctx, schedule.RouteID, prefix)
+    if err != nil {
+        return types.Message{
+            Status:     "error",
+            Code:       404,
+            Message:    "route not found",
+            MessageErr: err,
+        }
+    }
+    return types.Message{Status: "success", Code: 200, Data: route}
+}))
+
+dependencyResolver := resolver.NewDependencyResolver(registry)
+```
+
+### 1. Resolve trực tiếp
+
+Dùng khi service tự kiểm tra và hydrate model trước khi thực hiện logic/save:
+
+```go
+schedule := &Schedule{RouteID: "route-1"}
+
+if err := dependencyResolver.Resolve(ctx, schedule, currentPrefix); err != nil {
+    return err
+}
+
+// Phase 1: route resolver check/query RouteID bằng currentPrefix.
+// Phase 2: Message.Data được gán trực tiếp vào schedule.Route.
+// schedule đã sẵn sàng để save.
+```
+
+### 2. Resolve tự động trước khi save
+
+Dùng khi muốn repository tự resolve trong `BeforeInsert`. Chỉ đăng ký hook một lần khi khởi tạo application:
+
+```go
+hooks.RegisterDependencyResolver[Schedule](dependencyResolver)
+```
+
+Sau đó gọi repository bình thường:
+
+```go
+message := scheduleRepository.Create(Schedule{RouteID: "route-1"})
+if message.HasError() {
+    return message.MessageErr
+}
+```
+
+Flow tự động:
+
+```text
+repository.Create(data)
+→ BeforeInsert
+→ DependencyResolver.Resolve(ctx, &data, repository prefix)
+→ route resolver check/query RouteID
+→ gán Route data vào data.Route
+→ save data vào DB
+```
+
+Nếu dùng `into=Route` nhưng struct không khai báo field exported `Route`, lỗi `ErrReferenceTargetNotFound` được trả về ngay lúc đọc tag, trước khi resolver query DB/remote service.
 
 ## Benchmarks
 
