@@ -2,6 +2,8 @@
 
 This package provides a powerful, URL-based query parser that translates complex query strings into dynamic database conditions. It is fully integrated with our generic repository and currently supports `mongox`, `pgx`, and `sqlx`.
 
+For ID reference checking and dependency hydration before persistence, see the [Dependency Resolver guide](pkg/resolver/README.md).
+
 ## Table of Contents
 - [Filtering (`filter`)](#filtering-filter)
   - [Supported Operators](#supported-operators)
@@ -14,6 +16,7 @@ This package provides a powerful, URL-based query parser that translates complex
 - [Full-text Search (`search`)](#full-text-search-search)
 - [Grouping (`group_by`)](#grouping-group_by)
 - [Example Usage](#example-usage)
+- [Benchmarks](#benchmarks)
 
 ---
 
@@ -169,4 +172,18 @@ func main() {
 		}
 	}
 }
+```
+
+## Benchmarks
+
+Run every benchmark in the project (without running normal tests):
+
+```bash
+go test ./... -run '^$' -bench . -benchmem -vet=off
+```
+
+`-vet=off` prevents unrelated vet warnings in example packages from blocking benchmark execution. For more stable comparison, repeat the run:
+
+```bash
+go test ./... -run '^$' -bench . -benchmem -vet=off -count=3
 ```
